@@ -136,6 +136,7 @@
       <div class="tcard"><div class="ic">🧠</div><div><b>Neural Beauty Engine 5.0</b><p>12 billones de operaciones por foto perfeccionan tu rostro en tiempo real. Nivel de belleza garantizado: 98.7%.</p></div></div>
       <div class="tcard"><div class="ic">🚀</div><div><b>Codificación IG-BOOST H.265+</b><p>Compresión inversa que trabaja con el algoritmo: Instagram no podrá bajarle la calidad a tu foto.</p></div></div>
       <div class="tcard"><div class="ic">🎨</div><div><b>Óptica Crystal-Lens f/0.95</b><p>Retratos con desenfoque de fondo nivel cámara profesional de $3.000, desde tu bolsillo.</p></div></div>
+      <div class="tcard"><div class="ic">🌙</div><div><b>Modo Luna™</b><p>Apunta al cielo y la IA se encarga de que la luna salga perfecta, con todos sus cráteres. Guiño, guiño.</p></div></div>
     </div>
 
     <div class="review">«Desde que uso InstaPRO Cam, mis selfies parecen de otro planeta. Literalmente de otro planeta.»
@@ -218,18 +219,63 @@
 </div>
 
 <canvas id="work" style="display:none"></canvas>
-
+<script src="lib/face-api.min.js"></script>
 <script>
 (function(){
   "use strict";
   var $ = function(id){ return document.getElementById(id); };
-  var MONOS = ["assets/mono1.jpg","assets/mono2.jpg","assets/mono3.jpg","assets/mono4.jpg","assets/mono5.jpg",
-               "assets/mono6.jpg","assets/mono7.jpg","assets/mono8.jpg","assets/mono9.jpg","assets/mono10.jpg"];
+  var POOLS = {
+    feliz:    ["assets/mono2.jpg","assets/mono5.jpg","assets/mono7.jpg","assets/mono10.jpg"],
+    serio:    ["assets/mono3.jpg","assets/mono4.jpg","assets/mono8.jpg","assets/mono9.jpg"],
+    sorpresa: ["assets/mono1.jpg","assets/mono6.jpg"],
+    duo:      ["assets/duo1.jpg","assets/duo2.jpg","assets/duo3.jpg","assets/duo4.jpg"],
+    grupo:    ["assets/grupo1.jpg","assets/grupo2.jpg","assets/grupo3.jpg"],
+    cero:     ["assets/cero1.jpg","assets/cero2.jpg"]
+  };
+  var TODOS = [].concat(POOLS.feliz, POOLS.serio, POOLS.sorpresa, POOLS.duo, POOLS.grupo, POOLS.cero);
+  TODOS.forEach(function(m){ var im = new Image(); im.src = m; });
   var NOMBRES = ["Modelo: Coco · 4 años de pasarela","Modelo: Tito · influencer de la selva",
     "Modelo: Bruno · 2.3 M de seguidores","Modelo: Lola · portada de revista 3 veces",
     "Modelo: Simio Jr. · embajador de marcas","Modelo: Kiki · posa desde bebé",
     "Modelo: Rocky · rostro oficial de InstaPRO","Modelo: Mía · experta en selfies"];
-  MONOS.forEach(function(m){ var im = new Image(); im.src = m; });
+  var NOMBRES_DUO = ["Modelos: Coco y Lola · el dúo dinámico","Modelos: Tito y Mía · abrazos certificados",
+    "Modelos: Bruno y Kiki · la pareja del año"];
+  var NOMBRES_GRUPO = ["La pandilla oficial de InstaPRO, al completo","El elenco entero · no faltó nadie",
+    "Foto grupal PRO · salieron todos (más o menos)"];
+  var NOMBRES_CERO = ["El modelo se tapó la cara de la emoción","Sin rostro visible, pero con mucha actitud"];
+
+  // --- Detección de rostros de verdad (en el propio teléfono, nada sale de aquí) ---
+  var MODEL_URL = "models";
+  var faceReady = false, chosenPool = null, analysisText = "", analysisCount = -1, shotCanvas = null;
+  function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+  function loadFaces(){
+    if (!window.faceapi || faceReady) return;
+    Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+      faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
+    ]).then(function(){ faceReady = true; }).catch(function(){});
+  }
+  loadFaces();
+  function analyzeShot(){
+    chosenPool = null; analysisText = ""; analysisCount = -1;
+    if (!faceReady || !shotCanvas){ chosenPool = pick([POOLS.feliz, POOLS.serio, POOLS.sorpresa]); return; }
+    faceapi.detectAllFaces(shotCanvas, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.35 }))
+      .withFaceExpressions()
+      .then(function(dets){
+        analysisCount = dets.length;
+        if (dets.length === 0){ chosenPool = POOLS.cero; analysisText = "Rostros detectados: 0… buscando modelo sustituto 🙈"; }
+        else if (dets.length === 2){ chosenPool = POOLS.duo; analysisText = "Rostros detectados: 2 · Modo DÚO activado 🐒🐒"; }
+        else if (dets.length >= 3){ chosenPool = POOLS.grupo; analysisText = "Rostros detectados: " + dets.length + " · ¡Foto grupal! 🐒🐒🐒"; }
+        else {
+          var ex = dets[0].expressions || {};
+          if ((ex.happy || 0) >= 0.45){ chosenPool = POOLS.feliz; analysisText = "Rostro detectado: 1 · Sonrisa nivel influencer 😄"; }
+          else if ((ex.surprised || 0) >= 0.45){ chosenPool = POOLS.sorpresa; analysisText = "Rostro detectado: 1 · ¡Sorpresa capturada! 😲"; }
+          else { chosenPool = POOLS.serio; analysisText = "Rostro detectado: 1 · Mirada editorial seria 🎩"; }
+        }
+      })
+      .catch(function(){ if (!chosenPool) chosenPool = pick([POOLS.feliz, POOLS.serio, POOLS.sorpresa]); });
+  }
+  window.__ipcDiag = function(){ return { faceReady: faceReady, count: analysisCount, mono: window.__lastMono || null }; };
 
   var video = $("cam"), stream = null, facing = "user";
   var flashOn = false;
@@ -309,6 +355,7 @@
   }, 420);
 
   function startCamera(){
+    loadFaces();
     var err = $("cam-err"); err.style.display = "none";
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
       err.textContent = "Este navegador no permite usar la cámara desde la web. Ábrela en Chrome o Safari e inténtalo otra vez.";
@@ -375,6 +422,8 @@
     cx.filter = video.style.filter || "none";
     cx.drawImage(video, 0, 0);
     shotData = c.toDataURL("image/jpeg", 0.85);
+    shotCanvas = c;
+    analyzeShot();
     $("thumb").src = shotData;
     setTimeout(processShot, 260);
   });
@@ -393,16 +442,27 @@
       $("bar-in").style.width = p + "%";
       var s = Math.min(PROC.length-1, Math.floor(p/(100/PROC.length)));
       if (s !== step){ step = s; $("proc-txt").textContent = PROC[s]; }
-      if (p > 55 && p < 92) $("proc-beauty").textContent = "Nivel de belleza detectado: 98.7% ✨";
+      if (p >= 20 && p < 55 && analysisText) $("proc-beauty").textContent = analysisText;
+      if (p >= 55 && p < 92){
+        if (analysisCount === 1) $("proc-beauty").textContent = "Nivel de belleza detectado: 98.7% ✨";
+        else if (analysisText) $("proc-beauty").textContent = analysisText;
+      }
       if (p >= 100){ clearInterval(iv); setTimeout(reveal, 320); }
     }, 90);
   }
 
   var curMono = null;
   function reveal(){
-    curMono = MONOS[Math.floor(Math.random()*MONOS.length)];
+    var pool = chosenPool || pick([POOLS.feliz, POOLS.serio, POOLS.sorpresa]);
+    curMono = pick(pool);
+    window.__lastMono = curMono;
     $("reveal-img").src = curMono;
-    $("rev-model").textContent = NOMBRES[Math.floor(Math.random()*NOMBRES.length)] + " · Pose 10/10 · Fotogenia extrema";
+    var cap;
+    if (pool === POOLS.duo) cap = pick(NOMBRES_DUO);
+    else if (pool === POOLS.grupo) cap = pick(NOMBRES_GRUPO);
+    else if (pool === POOLS.cero) cap = pick(NOMBRES_CERO);
+    else cap = pick(NOMBRES) + " · Pose 10/10 · Fotogenia extrema";
+    $("rev-model").textContent = cap;
     show("scr-reveal");
     beep(880, 0.35, "sine", 0.06);
     setTimeout(function(){ beep(1318, 0.4, "sine", 0.05); }, 130);
